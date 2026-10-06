@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""审计模块隐私加固测试（A3 截图过期 / A4 日志脱敏）。"""
+"""审计模块安全测试（A3 截图过期 / A4 日志脱敏 / C2 链式哈希）。"""
 from __future__ import annotations
 
 import os
@@ -60,6 +60,51 @@ class TestLogSanitization(unittest.TestCase):
             audit.event("cast", "(0.500,0.850)")
             content = (Path(td) / "logs" / "run.log").read_text(encoding="utf-8")
             self.assertIn("(0.500,0.850)", content)
+
+
+class TestChainHash(unittest.TestCase):
+    """C2：日志链式哈希——改动任意行可被定位。"""
+
+    def _log(self, td):
+        return Path(td) / "logs" / "run.log"
+
+    def test_chain_intact_across_instances(self):
+        with tempfile.TemporaryDirectory() as td:
+            a1 = Audit(Path(td))
+            for i in range(3):
+                a1.event("cast", f"({i})")
+            ok, bad = Audit.verify_chain(self._log(td))
+            self.assertTrue(ok)
+            self.assertIsNone(bad)
+            a2 = Audit(Path(td))                      # 新实例续链追加
+            a2.event("resume", "续链")
+            ok, bad = Audit.verify_chain(self._log(td))
+            self.assertTrue(ok)
+
+    def test_tampered_line_detected(self):
+        with tempfile.TemporaryDirectory() as td:
+            audit = Audit(Path(td))
+            for i in range(5):
+                audit.event("cast", f"line{i}")
+            log = self._log(td)
+            lines = log.read_text(encoding="utf-8").splitlines()
+            lines[2] = lines[2].replace("line2", "HACKED")   # 篡改第 3 行
+            log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            ok, bad = Audit.verify_chain(log)
+            self.assertFalse(ok)
+            self.assertEqual(bad, 3, "应定位到第一条被改的行")
+
+    def test_removed_hash_detected(self):
+        with tempfile.TemporaryDirectory() as td:
+            audit = Audit(Path(td))
+            audit.event("cast", "(0)")
+            log = self._log(td)
+            lines = log.read_text(encoding="utf-8").splitlines()
+            lines[0] = lines[0].split(" ##h=")[0]            # 剥离哈希
+            log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            ok, bad = Audit.verify_chain(log)
+            self.assertFalse(ok)
+            self.assertEqual(bad, 1)
 
 
 if __name__ == "__main__":

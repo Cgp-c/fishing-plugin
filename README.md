@@ -140,6 +140,10 @@ python tests/test_e2e_game.py               # 单跑端到端（会弹游戏窗�
 | 序列号 | 设备序列号做字符白名单校验（`A-Za-z0-9:._-`），杜绝参数注入面（v0.2.1） |
 | 调试截图 | `--debug-save` 的截图超过 48 小时自动删除（截图含游戏昵称/头像，不留存过久）（v0.2.1） |
 | 日志脱敏 | 所有日志落盘前把用户主目录替换为 `~`，不泄露 Windows 用户名（v0.2.1） |
+| 发布哈希 | `python tools/make_release.py` 产出源码 zip + 包内逐文件 MANIFEST.sha256 + SHA256SUMS.txt 双层校验（v0.2.2，B1） |
+| 依赖哈希锁定 | `requirements.lock` 含三个依赖全部平台 wheel 的 sha256，可 `pip install --require-hashes` 防 PyPI 投毒（v0.2.2，B2） |
+| hdc 临时文件 | 远端截图临时文件每次运行随机命名，白名单校验 -f/rm/recv 只认本实例路径（v0.2.2，C1） |
+| 日志防篡改 | 日志行链式哈希 `##h=`，`Audit.verify_chain()` 可整卷校验并定位被改行（v0.2.2，C2；防随手篡改的证据链，非密码学信任边界） |
 
 ### 手机端最小权限与防扒窃
 
@@ -159,6 +163,22 @@ USB 调试开启期间，**电脑上任何软件**都能接触该接口。最有
 
 - 只对已登记设备的游戏画面操作，不触及其他应用
 - 插件不请求管理员权限、无开机自启、无后台驻留、无系统注入，进程退出即完全消失
+
+## 校验发布物完整性（拿到 zip 后）
+
+```bash
+# 1) 校验 zip 未被替换（对照发布页的 SHA256）
+certutil -hashfile fishing-plugin-vX.Y.Z-source.zip SHA256      # Windows
+sha256sum -c SHA256SUMS.txt                                     # Linux/macOS
+# 2) 解压后核对任意单文件
+cd fishing-plugin-vX.Y.Z-source && sha256sum -c MANIFEST.sha256
+```
+
+依赖安装的哈希锁定（可选，防 PyPI 投毒）：
+
+```bash
+pip install --require-hashes -r requirements.lock
+```
 
 ## 已知风险（诚实声明）
 

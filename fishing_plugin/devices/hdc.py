@@ -3,14 +3,16 @@
 ⚠ 状态：命令按 HarmonyOS Device Connector 公开用法实现，尚未实机联调
 （用户鸿蒙手机到位后用 --device hdc 验证，届时按实测微调命令与阈值）。
 
-安全约束与 adb 桥一致：白名单 + 序列号校验 + 审计。
+安全约束与 adb 桥一致：白名单 + 序列号校验 + 审计 + 工具绝对路径。
+远端临时截图文件名每次运行随机（C1：防固定路径被抢占/符号链接替换）。
 ⚠ 已知偏差（如实说明）：hdc 的 screencap（snapshot_display）只能落文件再回传，
-插件把截图写到 /data/local/tmp/__fishing_plugin__.jpeg 与本机临时目录，
+插件把截图写到 /data/local/tmp/__fishing_plugin_<随机>.jpeg 与本机临时目录，
 读入内存后立即删除两端临时文件；除此之外截图同样不落盘。
 """
 from __future__ import annotations
 
 import re
+import secrets
 import subprocess
 import tempfile
 from pathlib import Path
@@ -21,7 +23,7 @@ import numpy as np
 from .base import DeviceBridge, DeviceError, resolve_tool, validate_serial
 
 _TIMEOUT = 25
-_REMOTE_TMP = "/data/local/tmp/__fishing_plugin__.jpeg"
+_REMOTE_DIR = "/data/local/tmp/"
 
 
 class HdcBridge(DeviceBridge):
@@ -31,6 +33,8 @@ class HdcBridge(DeviceBridge):
         super().__init__(audit)
         self.serial = validate_serial(serial)      # hdc 称 connect key / target
         self.binary, self.binary_source = resolve_tool("hdc", binary)
+        # C1：每次运行随机远端文件名，避免固定路径被抢占
+        self.remote_tmp = f"{_REMOTE_DIR}__fishing_plugin_{secrets.token_hex(4)}.jpeg"
         self._check_targets()
 
     # ------------------------------------------------------------------ 校验
@@ -63,11 +67,12 @@ class HdcBridge(DeviceBridge):
         if a[:2] == ["list", "targets"]:
             ok = True
         elif a[:2] == ["shell", "snapshot_display"]:
-            ok = True
+            # -f 的目标必须且只能是本实例的随机临时文件
+            ok = ("-f" in a and a[a.index("-f") + 1] == self.remote_tmp)
         elif a[:2] == ["file", "recv"]:
-            ok = len(a) >= 4 and a[2] == _REMOTE_TMP
+            ok = len(a) >= 4 and a[2] == self.remote_tmp
         elif a[:2] == ["shell", "rm"] and len(a) == 3:
-            ok = a[2] == _REMOTE_TMP
+            ok = a[2] == self.remote_tmp
         elif a[:4] == ["shell", "uitest", "uiInput", "click"] and len(a) == 6:
             ok = all(re.fullmatch(r"\d+", s) for s in a[4:6])
         elif a[:2] == ["shell", "power-shell"] and len(a) == 3 and a[2] == "wakeup":
@@ -95,12 +100,12 @@ class HdcBridge(DeviceBridge):
 
     # ------------------------------------------------------------------ 接口
     def screenshot(self) -> np.ndarray:
-        self._run(self._dev() + ["shell", "snapshot_display", "-f", _REMOTE_TMP])
+        self._run(self._dev() + ["shell", "snapshot_display", "-f", self.remote_tmp])
         with tempfile.TemporaryDirectory(prefix="fishing_plugin_") as td:
             local = Path(td) / "shot.jpeg"
-            self._run(self._dev() + ["file", "recv", _REMOTE_TMP, str(local)])
+            self._run(self._dev() + ["file", "recv", self.remote_tmp, str(local)])
             bgr = cv2.imdecode(np.fromfile(local, dtype=np.uint8), cv2.IMREAD_COLOR)
-        self._run(self._dev() + ["shell", "rm", _REMOTE_TMP])   # 无论成败都尝试清理
+        self._run(self._dev() + ["shell", "rm", self.remote_tmp])   # 无论成败都尝试清理
         if bgr is None:
             raise DeviceError("snapshot_display 截图解码失败")
         self._size = (bgr.shape[1], bgr.shape[0])

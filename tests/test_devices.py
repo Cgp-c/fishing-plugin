@@ -126,7 +126,7 @@ class TestHdcSecurity(unittest.TestCase):
 
     def test_whitelist_allows_expected(self):
         b = make_hdc("KEY1\n")
-        T = "/data/local/tmp/__fishing_plugin__.jpeg"
+        T = b.remote_tmp                              # C1：每次运行随机的临时文件名
         H = b.binary
         for ok in ([H, "list", "targets"],
                    [H, "-t", b.serial, "shell", "snapshot_display", "-f", T],
@@ -136,6 +136,21 @@ class TestHdcSecurity(unittest.TestCase):
                    [H, "-t", b.serial, "shell", "power-shell", "wakeup"],
                    [H, "kill"]):
             b._checked(ok)
+
+    def test_remote_tmp_random_and_pinned_to_instance(self):
+        """C1：远端临时文件随机名；其他路径/其他实例的文件名一律拒绝。"""
+        b1 = make_hdc("KEY1\n")
+        b2 = make_hdc("KEY1\n")
+        self.assertNotEqual(b1.remote_tmp, b2.remote_tmp)
+        self.assertIn("__fishing_plugin_", b1.remote_tmp)
+        for bad in (["hdc", "-t", b1.serial, "shell", "snapshot_display",
+                     "-f", "/data/local/tmp/__fishing_plugin__.jpeg"],
+                    ["hdc", "-t", b1.serial, "shell", "snapshot_display",
+                     "-f", b2.remote_tmp],
+                    ["hdc", "-t", b1.serial, "shell", "rm", "/etc/passwd"],
+                    ["hdc", "-t", b1.serial, "file", "recv", b2.remote_tmp, "x"]):
+            with self.assertRaises(DeviceError, msg=str(bad)):
+                b1._checked(bad)
 
     def test_tap_pixel_math(self):
         b = make_hdc("KEY1\n")

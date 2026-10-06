@@ -6,14 +6,27 @@
 
 隐私处理（A4）：写入任何日志前把用户主目录替换为 ~，
 traceback 中的 C:\\Users\\<用户名>\\... 不再泄露 Windows 用户名。
+
+防篡改（C2）：每条日志行附带链式哈希 ##h=<16 hex>，即
+sha256(上一条哈希 + 本行内容) 的前 16 个十六进制字符。verify_chain() 可整卷
+校验并定位第一条被改动的行。诚实说明：这是"随手改动可被发现"的证据链，
+攻击者若重算整条链仍可伪造——它不是密码学信任边界，只是完整性自检。
 """
 from __future__ import annotations
 
+import hashlib
+import re
 import shutil
 import time
 from pathlib import Path
 
 DEBUG_TTL_S = 48 * 3600          # debug 截图保留时长
+_GENESIS = "0" * 16
+_HASH_RE = re.compile(r" ##h=([0-9a-f]{16})$")
+
+
+def _line_hash(prev: str, line: str) -> str:
+    return hashlib.sha256((prev + line).encode("utf-8", "replace")).hexdigest()[:16]
 
 
 class Audit:
@@ -27,20 +40,60 @@ class Audit:
         except Exception:
             self._home = ""
         self._swept = False        # debug/ 过期清扫只做一次/实例
+        self._chain: dict[Path, str] = {}
 
+    # ------------------------------------------------------------------ 链式哈希
+    def _last_hash(self, path: Path) -> str:
+        """读取既有日志的最后一个哈希，续链；无/旧格式则从头开始。"""
+        if not path.is_file():
+            return _GENESIS
+        try:
+            last = ""
+            with path.open("r", encoding="utf-8") as f:
+                for last in f:
+                    pass
+            m = _HASH_RE.search(last.rstrip("\r\n"))
+            return m.group(1) if m else _GENESIS
+        except OSError:
+            return _GENESIS
+
+    def _append(self, path: Path, line: str) -> None:
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        full = f"[{stamp}] {self._sanitize(line)}"
+        h = _line_hash(self._chain.get(path) or self._last_hash(path), full)
+        try:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(f"{full} ##h={h}\n")
+            self._chain[path] = h
+        except OSError:
+            pass                        # 日志失败不阻断主流程
+
+    @staticmethod
+    def verify_chain(path: str | Path) -> tuple[bool, int | None]:
+        """校验日志链。返回 (是否完整, 第一条问题行号)。"""
+        prev = _GENESIS
+        try:
+            with Path(path).open("r", encoding="utf-8") as f:
+                for no, raw in enumerate(f, 1):
+                    line = raw.rstrip("\r\n")
+                    m = _HASH_RE.search(line)
+                    if not m:
+                        return False, no           # 旧格式/哈希被剥离
+                    content = line[:m.start()]
+                    if _line_hash(prev, content) != m.group(1):
+                        return False, no
+                    prev = m.group(1)
+        except OSError:
+            return False, None
+        return True, None
+
+    # ------------------------------------------------------------------ 隐私
     def _sanitize(self, line: str) -> str:
         if self._home and len(self._home) > 3 and self._home in line:
             line = line.replace(self._home, "~")
         return line
 
-    def _append(self, path: Path, line: str) -> None:
-        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            with path.open("a", encoding="utf-8") as f:
-                f.write(f"[{stamp}] {self._sanitize(line)}\n")
-        except OSError:
-            pass                        # 日志失败不阻断主流程
-
+    # ------------------------------------------------------------------ 接口
     def cmd(self, device: str, argv: list[str], allowed: bool = True) -> None:
         flag = "OK " if allowed else "REFUSED"
         self._append(self.logs_dir / "audit.log", f"{flag} [{device}] {' '.join(map(str, argv))}")
