@@ -101,5 +101,10 @@
   "notify": {
     "beep": true,
     "beep_times": 3
-  }
+  },
+  "hotkey_resume": "F10",
+  "verify_before_tap": true,
+  "ready_stable_frames": 2,
+  "max_device_errors": 2,
+  "start_auto": false
 }

@@ -69,8 +69,14 @@ DEFAULTS: dict = {
         "after_action": [600, 1200],   # 动作后额外等待
     },
     "action_cooldown_s": 2.0,          # 任意两次点击最小间隔（防连点/防重复抛竿）
+    "verify_before_tap": True,         # 点击前二次复核界面（防购买护栏的关键开关）
+    "ready_stable_frames": 2,          # READY 连续 N 帧才抛竿（防单帧误判）
+    "max_device_errors": 2,            # 截屏/设备连续失败 N 次 → 硬停止
+    "start_auto": False,               # 启动后是否自动开始（False=等用户点「开始」）
 
-    "hotkey_pause": "F9",              # 全局急停/恢复（轮询 GetAsyncKeyState，无需管理员）
+    # 热键为兜底，主入口是 GUI 大按钮（小白友好）
+    "hotkey_pause": "F9",              # 暂停/恢复切换
+    "hotkey_resume": "F10",            # 恢复（停止/暂停后人工恢复的唯一快捷途径）
     "device": {"type": "pc", "serial": ""},   # pc | adb | hdc
     "notify": {"beep": True, "beep_times": 3},
 }

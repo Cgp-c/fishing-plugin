@@ -2,6 +2,9 @@
 
     python -m fishing_plugin [选项]
 
+默认启动**图形控制面板**（小白友好：大按钮开始/暂停/退出，任何意外自动停止、
+绝不自动恢复，恢复只能点「继续」或按 F10）。加 --no-gui 走控制台模式（测试/高级）。
+
 常用：
   --device pc|adb|hdc     设备桥（默认 pc：对"简单钓鱼游戏验证"窗口跑）
   --serial XXX            手机序列号（不填则要求恰好一台设备在线）
@@ -9,9 +12,11 @@
   --ref-width N           模板来源截图宽度（qiufu_real.png 为 929）
   --dry-run               只检测不点击（首次上真机建议先跑这个）
   --debug-save            截图落盘到 debug/（默认不落盘）
+  --no-gui                控制台模式（配合 --auto-start 无人值守；Ctrl+C 退出）
+  --auto-start            （--no-gui）启动后立即开始，不等待人工
   --list-devices          列出 adb/hdc 在线设备
   --purge                 一键清理 logs/ 与 debug/
-  --duration 秒           运行时长上限（到点自动停）
+  --duration 秒           运行时长上限（到点自动停止）
   --kill-server           退出时 adb kill-server / hdc kill
   --seed N                固定随机种子（测试复现用）
 """
@@ -24,7 +29,7 @@ from pathlib import Path
 
 from . import __version__
 from .audit import Audit
-from .bot import FishingBot
+from .bot import BotStatus, FishingBot
 from .config import PLUGIN_ROOT, load_config
 from .detector import Detector
 from .devices import create_bridge
@@ -46,7 +51,7 @@ def _win_dpi_aware() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="fishing_plugin",
-                                 description="自动钓鱼插件（本地检测，零联网）")
+                                 description="自动钓鱼插件（本地检测，零联网，任何意外即停）")
     ap.add_argument("--device", choices=["pc", "adb", "hdc"], default=None)
     ap.add_argument("--serial", default=None, help="手机序列号（序列号校验用）")
     ap.add_argument("--title", default=None, help="pc 桥窗口标题覆盖")
@@ -55,6 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--ref-width", type=int, default=None, help="模板来源截图宽度(px)")
     ap.add_argument("--dry-run", action="store_true", help="只检测不点击")
     ap.add_argument("--debug-save", action="store_true", help="截图保存到 debug/")
+    ap.add_argument("--no-gui", action="store_true", help="控制台模式（默认开图形面板）")
+    ap.add_argument("--auto-start", action="store_true",
+                    help="（控制台模式）启动后立即开始，不等待人工")
     ap.add_argument("--list-devices", action="store_true")
     ap.add_argument("--purge", action="store_true", help="清理 logs/ 与 debug/")
     ap.add_argument("--duration", type=float, default=None, help="运行秒数上限")
@@ -107,18 +115,36 @@ def main(argv: list[str] | None = None) -> int:
 
     human = Humanizer(rng, cfg["delays_ms"])
     bot = FishingBot(bridge, detector, human, notifier, audit, cfg,
-                     dry_run=args.dry_run, debug_save=args.debug_save)
-    print(f"fishing-plugin v{__version__}  零联网·本地检测  模板={Path(tpl).name}({ref_w}px)")
+                     dry_run=args.dry_run, debug_save=args.debug_save,
+                     start_auto=args.auto_start)
+    is_phone = (args.device in ("adb", "hdc")
+                or (args.device is None and cfg["device"]["type"] in ("adb", "hdc")))
+    print(f"fishing-plugin v{__version__}  零联网·本地检测·任何意外即停  "
+          f"模板={Path(tpl).name}({ref_w}px)  桥={bridge.name}")
+
+    def _cleanup() -> None:
+        bridge.close(kill_server=args.kill_server)
+        if is_phone:
+            print("提示：用完记得关闭手机上的 USB 调试（开发者选项），拔线即可。")
+
     rc = 0
     try:
-        bot.run(duration=args.duration)
+        if args.no_gui:
+            bot.run(duration=args.duration)
+            if bot.status is not BotStatus.STOPPED:
+                rc = 4
+        else:
+            from .app import ControlApp
+            suffix = "（试运行·不点击）" if args.dry_run else ""
+            app = ControlApp(bot, on_exit=_cleanup, title_suffix=suffix)
+            app.run()
     except DeviceError as e:
         print(f"运行中设备错误：{e}")
         rc = 4
     finally:
-        bridge.close(kill_server=args.kill_server)
-        if args.device in ("adb", "hdc") or (args.device is None and cfg["device"]["type"] in ("adb", "hdc")):
-            print("提示：用完记得关闭手机上的 USB 调试（开发者选项），拔线即可。")
+        bot.exit()
+        if args.no_gui:
+            _cleanup()
     return rc
 
 
