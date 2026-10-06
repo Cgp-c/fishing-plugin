@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+logs/
+debug/
+config.local.json
+tests/__frames__/
+.pytest_cache/

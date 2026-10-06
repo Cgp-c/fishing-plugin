@@ -1,0 +1,105 @@
+{
+  "window_title": "简单钓鱼游戏验证",
+  "template": "templates/qiufu_test.png",
+  "template_ref_width": 540,
+  "zones": {
+    "qiufu_search": {
+      "x0": 0.0,
+      "y0": 0.64,
+      "x1": 0.18,
+      "y1": 0.75
+    },
+    "cast_hint": {
+      "x0": 0.32,
+      "y0": 0.845,
+      "x1": 0.68,
+      "y1": 0.895
+    },
+    "name_band": {
+      "x0": 0.4,
+      "y0": 0.5,
+      "x1": 0.6,
+      "y1": 0.55
+    },
+    "btn_left": {
+      "x0": 0.14,
+      "y0": 0.79,
+      "x1": 0.43,
+      "y1": 0.86
+    },
+    "safe_cast": {
+      "x0": 0.25,
+      "y0": 0.78,
+      "x1": 0.75,
+      "y1": 0.92
+    }
+  },
+  "thresholds": {
+    "qiufu_match": 0.85,
+    "anchor_miss_frames": 3,
+    "catch_mean_v_max": 95.0,
+    "hint_color_dist": 60.0,
+    "hint_zone_ratio": 0.08,
+    "hint_col_ratio": 0.3,
+    "nameband_sel_ratio": 0.008,
+    "unknown_frames": 3,
+    "btn_ratio_min": 0.02,
+    "nameband_v_min": 120,
+    "nameband_s_min": 60,
+    "nameband_share_min": 0.25
+  },
+  "hsv_bands": [
+    {
+      "name": "绿",
+      "lo": 90.0,
+      "hi": 160.0
+    },
+    {
+      "name": "蓝",
+      "lo": 195.0,
+      "hi": 235.0
+    },
+    {
+      "name": "紫",
+      "lo": 255.0,
+      "hi": 330.0
+    },
+    {
+      "name": "黄",
+      "lo": 42.0,
+      "hi": 65.0
+    }
+  ],
+  "rare_rarities": [
+    "紫",
+    "黄"
+  ],
+  "delays_ms": {
+    "cast": [
+      700,
+      1600
+    ],
+    "catch_click": [
+      500,
+      1200
+    ],
+    "poll": [
+      400,
+      800
+    ],
+    "after_action": [
+      600,
+      1200
+    ]
+  },
+  "action_cooldown_s": 2.0,
+  "hotkey_pause": "F9",
+  "device": {
+    "type": "pc",
+    "serial": ""
+  },
+  "notify": {
+    "beep": true,
+    "beep_times": 3
+  }
+}
