@@ -14,19 +14,18 @@ import subprocess
 import cv2
 import numpy as np
 
-from .base import DeviceBridge, DeviceError
+from .base import DeviceBridge, DeviceError, resolve_tool, validate_serial
 
-_BIN = "adb"
 _TIMEOUT = 20
 
 
 class AdbBridge(DeviceBridge):
     name = "adb"
 
-    def __init__(self, serial: str = "", audit=None, binary: str = _BIN):
+    def __init__(self, serial: str = "", audit=None, binary: str = ""):
         super().__init__(audit)
-        self.binary = binary
-        self.serial = serial.strip()
+        self.serial = validate_serial(serial)
+        self.binary, self.binary_source = resolve_tool("adb", binary)
         self._check_serial()
 
     # ------------------------------------------------------------------ 校验

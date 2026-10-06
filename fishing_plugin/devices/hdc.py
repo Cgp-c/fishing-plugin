@@ -18,9 +18,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .base import DeviceBridge, DeviceError
+from .base import DeviceBridge, DeviceError, resolve_tool, validate_serial
 
-_BIN = "hdc"
 _TIMEOUT = 25
 _REMOTE_TMP = "/data/local/tmp/__fishing_plugin__.jpeg"
 
@@ -28,10 +27,10 @@ _REMOTE_TMP = "/data/local/tmp/__fishing_plugin__.jpeg"
 class HdcBridge(DeviceBridge):
     name = "hdc"
 
-    def __init__(self, serial: str = "", audit=None, binary: str = _BIN):
+    def __init__(self, serial: str = "", audit=None, binary: str = ""):
         super().__init__(audit)
-        self.binary = binary
-        self.serial = serial.strip()      # hdc 称 connect key / target
+        self.serial = validate_serial(serial)      # hdc 称 connect key / target
+        self.binary, self.binary_source = resolve_tool("hdc", binary)
         self._check_targets()
 
     # ------------------------------------------------------------------ 校验

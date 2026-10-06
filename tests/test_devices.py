@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """设备桥安全约束测试（不连接真实设备，全部 mock subprocess）。
 
-覆盖：序列号校验（不匹配→拒绝）、命令白名单（结构外命令一律拒绝并审计）、
-点击像素换算。
+覆盖：序列号校验（格式/不匹配→拒绝）、命令白名单（结构外命令一律拒绝并审计）、
+点击像素换算、adb/hdc 工具路径防 PATH 劫持（A1）。
 """
 from __future__ import annotations
 
@@ -16,10 +16,15 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from fishing_plugin.audit import Audit                      # noqa: E402
-from fishing_plugin.devices.adb import AdbBridge            # noqa: E402
-from fishing_plugin.devices.base import DeviceError         # noqa: E402
-from fishing_plugin.devices.hdc import HdcBridge            # noqa: E402
+from fishing_plugin.audit import Audit                                # noqa: E402
+from fishing_plugin.devices.adb import AdbBridge                      # noqa: E402
+from fishing_plugin.devices.base import (DeviceError, resolve_tool,   # noqa: E402
+                                         validate_serial)
+from fishing_plugin.devices.hdc import HdcBridge                      # noqa: E402
+
+FAKE_TOOL = "C:/PlatformTools/adb.exe"           # which() 的假解析结果（不会真执行）
+FAKE_TOOL_HDC = "C:/Sdk/toolchains/hdc.exe"
+ADB_OTHER = b"List of devices attached\nOTHER\tdevice\n"
 
 
 def fake_run(stdout: bytes = b"", rc: int = 0):
@@ -28,14 +33,21 @@ def fake_run(stdout: bytes = b"", rc: int = 0):
     return _run
 
 
+def fake_which(name, path=None):
+    return FAKE_TOOL if name == "adb" else FAKE_TOOL_HDC
+
+
 def make_adb(devices: str, serial: str = "ABC123") -> AdbBridge:
     out = ("List of devices attached\n" + devices).encode()
-    with mock.patch("fishing_plugin.devices.adb.subprocess.run", side_effect=fake_run(out)):
+    with mock.patch("fishing_plugin.devices.adb.subprocess.run", side_effect=fake_run(out)), \
+         mock.patch("fishing_plugin.devices.base.shutil.which", side_effect=fake_which):
         return AdbBridge(serial=serial)
 
 
 def make_hdc(targets: str, serial: str = "KEY1") -> HdcBridge:
-    with mock.patch("fishing_plugin.devices.hdc.subprocess.run", side_effect=fake_run(targets.encode())):
+    with mock.patch("fishing_plugin.devices.hdc.subprocess.run",
+                    side_effect=fake_run(targets.encode())), \
+         mock.patch("fishing_plugin.devices.base.shutil.which", side_effect=fake_which):
         return HdcBridge(serial=serial)
 
 
@@ -44,7 +56,8 @@ class TestAdbSecurity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             audit = Audit(Path(td))
             with mock.patch("fishing_plugin.devices.adb.subprocess.run",
-                            side_effect=fake_run(b"List of devices attached\nOTHER\tdevice\n")):
+                            side_effect=fake_run(ADB_OTHER)), \
+                 mock.patch("fishing_plugin.devices.base.shutil.which", side_effect=fake_which):
                 with self.assertRaises(DeviceError):
                     AdbBridge(serial="ABC123", audit=audit)
             refused = (Path(td) / "logs" / "audit.log").read_text(encoding="utf-8")
@@ -52,7 +65,8 @@ class TestAdbSecurity(unittest.TestCase):
 
     def test_no_device(self):
         with mock.patch("fishing_plugin.devices.adb.subprocess.run",
-                        side_effect=fake_run(b"List of devices attached\n")):
+                        side_effect=fake_run(b"List of devices attached\n")), \
+             mock.patch("fishing_plugin.devices.base.shutil.which", side_effect=fake_which):
             with self.assertRaises(DeviceError):
                 AdbBridge()
 
@@ -70,12 +84,13 @@ class TestAdbSecurity(unittest.TestCase):
 
     def test_whitelist_allows_expected(self):
         b = make_adb("ABC123\tdevice\n")
-        for ok in (["adb", "devices"],
-                   ["adb", "-s", b.serial, "exec-out", "screencap", "-p"],
-                   ["adb", "-s", b.serial, "shell", "input", "tap", "100", "200"],
-                   ["adb", "-s", b.serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
-                   ["adb", "-s", b.serial, "shell", "wm", "size"],
-                   ["adb", "kill-server"]):
+        A = b.binary
+        for ok in ([A, "devices"],
+                   [A, "-s", b.serial, "exec-out", "screencap", "-p"],
+                   [A, "-s", b.serial, "shell", "input", "tap", "100", "200"],
+                   [A, "-s", b.serial, "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
+                   [A, "-s", b.serial, "shell", "wm", "size"],
+                   [A, "kill-server"]):
             b._checked(ok)     # 不抛即通过
 
     def test_tap_pixel_math(self):
@@ -92,7 +107,8 @@ class TestHdcSecurity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             audit = Audit(Path(td))
             with mock.patch("fishing_plugin.devices.hdc.subprocess.run",
-                            side_effect=fake_run(b"OTHER\n")):
+                            side_effect=fake_run(b"OTHER\n")), \
+                 mock.patch("fishing_plugin.devices.base.shutil.which", side_effect=fake_which):
                 with self.assertRaises(DeviceError):
                     HdcBridge(serial="KEY1", audit=audit)
             refused = (Path(td) / "logs" / "audit.log").read_text(encoding="utf-8")
@@ -111,13 +127,14 @@ class TestHdcSecurity(unittest.TestCase):
     def test_whitelist_allows_expected(self):
         b = make_hdc("KEY1\n")
         T = "/data/local/tmp/__fishing_plugin__.jpeg"
-        for ok in (["hdc", "list", "targets"],
-                   ["hdc", "-t", b.serial, "shell", "snapshot_display", "-f", T],
-                   ["hdc", "-t", b.serial, "file", "recv", T, "C:/tmp/x.jpg"],
-                   ["hdc", "-t", b.serial, "shell", "rm", T],
-                   ["hdc", "-t", b.serial, "shell", "uitest", "uiInput", "click", "540", "1170"],
-                   ["hdc", "-t", b.serial, "shell", "power-shell", "wakeup"],
-                   ["hdc", "kill"]):
+        H = b.binary
+        for ok in ([H, "list", "targets"],
+                   [H, "-t", b.serial, "shell", "snapshot_display", "-f", T],
+                   [H, "-t", b.serial, "file", "recv", T, "C:/tmp/x.jpg"],
+                   [H, "-t", b.serial, "shell", "rm", T],
+                   [H, "-t", b.serial, "shell", "uitest", "uiInput", "click", "540", "1170"],
+                   [H, "-t", b.serial, "shell", "power-shell", "wakeup"],
+                   [H, "kill"]):
             b._checked(ok)
 
     def test_tap_pixel_math(self):
@@ -127,6 +144,62 @@ class TestHdcSecurity(unittest.TestCase):
             b.tap(0.25, 0.75)
         argv = run.call_args[0][0]
         self.assertEqual(argv[-2:], ["314", "2039"])
+
+
+class TestToolPathSecurity(unittest.TestCase):
+    """A1：adb/hdc 工具路径防 PATH 劫持。"""
+
+    def test_relative_path_rejected(self):
+        with self.assertRaises(DeviceError):
+            resolve_tool("adb", "adb.exe")            # 相对路径无法确认来源
+        with self.assertRaises(DeviceError):
+            resolve_tool("hdc", "tools/hdc")
+
+    def test_nonexistent_path_rejected(self):
+        with self.assertRaises(DeviceError):
+            resolve_tool("adb", "C:/nonexistent/adb.exe")
+
+    def test_configured_absolute_path_accepted(self):
+        with tempfile.TemporaryDirectory() as td:
+            exe = Path(td) / "adb.exe"
+            exe.write_bytes(b"")
+            path, src = resolve_tool("adb", str(exe))
+            self.assertEqual(path, str(exe))
+            self.assertEqual(src, "配置")
+
+    def test_which_resolution_absolute(self):
+        with mock.patch("fishing_plugin.devices.base.shutil.which", return_value=FAKE_TOOL):
+            path, src = resolve_tool("adb", "")
+        self.assertEqual(path, str(Path(FAKE_TOOL).resolve()))
+        self.assertEqual(src, "PATH")
+
+    def test_bridge_uses_resolved_binary(self):
+        b = make_adb("ABC123\tdevice\n")
+        self.assertEqual(b.binary, str(Path(FAKE_TOOL).resolve()))
+        self.assertEqual(b.binary_source, "PATH")
+
+    def test_missing_tool_reports_clearly(self):
+        with mock.patch("fishing_plugin.devices.base.shutil.which", return_value=None):
+            with self.assertRaises(DeviceError):
+                resolve_tool("adb", "")
+
+
+class TestSerialValidation(unittest.TestCase):
+    """A2：序列号格式校验（防参数注入面）。"""
+
+    def test_bad_serials_rejected(self):
+        for bad in ("shell rm -rf /", "a b", "a;b", "a|b", "x" * 65, "dev\nattack"):
+            with self.assertRaises(DeviceError, msg=repr(bad)):
+                validate_serial(bad)
+
+    def test_good_serials_accepted(self):
+        for ok in ("ABC123", "emulator-5554", "a1:b2:c3", "MY.device-01", ""):
+            self.assertEqual(validate_serial(ok), ok.strip())
+
+    def test_bridge_rejects_bad_serial(self):
+        with mock.patch("fishing_plugin.devices.base.shutil.which", side_effect=fake_which):
+            with self.assertRaises(DeviceError):
+                AdbBridge(serial="shell rm -rf /")
 
 
 if __name__ == "__main__":

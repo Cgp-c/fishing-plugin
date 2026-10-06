@@ -28,7 +28,8 @@ STATUS_TEXT = {
 
 
 class ControlApp:
-    def __init__(self, bot: FishingBot, *, on_exit=None, title_suffix: str = ""):
+    def __init__(self, bot: FishingBot, *, on_exit=None, title_suffix: str = "",
+                 tool_info: str = ""):
         self.bot = bot
         self.on_exit = on_exit
 

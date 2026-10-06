@@ -87,8 +87,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_devices:
         for cls, label in ((AdbBridge, "adb"), (HdcBridge, "hdc")):
             try:
-                bridge = cls(audit=audit)
-                print(f"{label}: {bridge.list_devices() if hasattr(bridge, 'list_devices') else bridge.list_targets()}")
+                bridge = cls(audit=audit, binary=(cfg.get("tools") or {}).get(f"{label}_path", ""))
+                names = bridge.list_devices() if hasattr(bridge, "list_devices") else bridge.list_targets()
+                print(f"{label}: {names}")
+                print(f"  工具路径: {bridge.binary}（来源：{bridge.binary_source}）")
             except (DeviceError, FileNotFoundError) as e:
                 print(f"{label}: 不可用（{e}）")
         return 0
@@ -119,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
                      start_auto=args.auto_start)
     is_phone = (args.device in ("adb", "hdc")
                 or (args.device is None and cfg["device"]["type"] in ("adb", "hdc")))
+    tool_info = ""
+    if getattr(bridge, "binary", None):
+        tool_info = f"{bridge.name} = {bridge.binary}（来源：{bridge.binary_source}）"
+        print(f"工具路径核对: {tool_info}   ← 请确认是官方 adb/hdc，防 PATH 劫持")
+        audit.event("tool_path", tool_info)
     print(f"fishing-plugin v{__version__}  零联网·本地检测·任何意外即停  "
           f"模板={Path(tpl).name}({ref_w}px)  桥={bridge.name}")
 
@@ -136,7 +143,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             from .app import ControlApp
             suffix = "（试运行·不点击）" if args.dry_run else ""
-            app = ControlApp(bot, on_exit=_cleanup, title_suffix=suffix)
+            app = ControlApp(bot, on_exit=_cleanup, title_suffix=suffix,
+                             tool_info=tool_info)
             app.run()
     except DeviceError as e:
         print(f"运行中设备错误：{e}")

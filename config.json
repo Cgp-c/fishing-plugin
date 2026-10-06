@@ -106,5 +106,9 @@
   "verify_before_tap": true,
   "ready_stable_frames": 2,
   "max_device_errors": 2,
-  "start_auto": false
+  "start_auto": false,
+  "tools": {
+    "adb_path": "",
+    "hdc_path": ""
+  }
 }

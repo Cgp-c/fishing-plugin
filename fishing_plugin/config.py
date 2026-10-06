@@ -75,6 +75,8 @@ DEFAULTS: dict = {
     "start_auto": False,               # 启动后是否自动开始（False=等用户点「开始」）
 
     # 热键为兜底，主入口是 GUI 大按钮（小白友好）
+    # 手机工具绝对路径（防 PATH 劫持；留空=按 PATH 查找并在启动时显示解析结果供核对）
+    "tools": {"adb_path": "", "hdc_path": ""},
     "hotkey_pause": "F9",              # 暂停/恢复切换
     "hotkey_resume": "F10",            # 恢复（停止/暂停后人工恢复的唯一快捷途径）
     "device": {"type": "pc", "serial": ""},   # pc | adb | hdc

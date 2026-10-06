@@ -12,6 +12,9 @@
 from __future__ import annotations
 
 import abc
+import re
+import shutil
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -19,6 +22,39 @@ import numpy as np
 
 class DeviceError(RuntimeError):
     """设备不可用 / 序列号不匹配 / 命令被白名单拒绝等。"""
+
+
+# 序列号/connect key 合法字符（防参数注入：序列号会进入命令行参数）
+_SERIAL_RE = re.compile(r"^[A-Za-z0-9:._\-]{1,64}$")
+
+
+def validate_serial(serial: str) -> str:
+    s = (serial or "").strip()
+    if s and not _SERIAL_RE.match(s):
+        raise DeviceError(f"设备序列号含非法字符: {serial!r}（只允许字母数字与 : . _ -，最长 64）")
+    return s
+
+
+def resolve_tool(tool_name: str, configured: str = "") -> tuple[str, str]:
+    """解析 adb/hdc 可执行文件，防 PATH 劫持。
+
+    返回 (绝对路径, 来源)。configured 非空时必须是**绝对路径**且存在；
+    为空时用 shutil.which 解析成绝对路径（找不到则报错，绝不静默用裸名称）。
+    启动时应把返回的绝对路径展示给用户核对。
+    """
+    configured = (configured or "").strip()
+    if configured:
+        p = Path(configured)
+        if not p.is_absolute():
+            raise DeviceError(f"{tool_name} 路径必须是绝对路径（防 PATH 劫持）: {configured}")
+        if not p.is_file():
+            raise DeviceError(f"{tool_name} 不存在: {configured}")
+        return str(p), "配置"
+    found = shutil.which(tool_name)
+    if not found:
+        raise DeviceError(f"在 PATH 中找不到 {tool_name}（可在 config 的 tools.{tool_name}_path "
+                          "指定绝对路径）")
+    return str(Path(found).resolve()), "PATH"
 
 
 class DeviceBridge(abc.ABC):
